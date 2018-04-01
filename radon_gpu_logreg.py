@@ -2,7 +2,7 @@ import numpy as np
 import argparse
 import os
 import pycuda.autoinit
-import pycuda.driver as drv
+import pycuda.driver as cuda
 import numpy
 
 from pandas import read_csv
@@ -30,20 +30,15 @@ hyper = vars(parameters) #hyper -> dict containing all hyper parameters
 # PyCUDA work here
 mod = SourceModule("""
 #define _CRT_SECURE_NO_WARNINGS
+
+#include "cuda_runtime.h"
+#include "device_launch_parameters.h"
+
 #include<stdlib.h>
 #include<math.h>
-#include<stdio.h>
-#include<string.h>
-#include<time.h>
 
-#define ROW 4
-#define TRAIN_SIZE 20000
-#define TEST_SIZE 4000
-#define VERBOSE 0
-#define L2 0.1
-#define TOL 0.0001
 
-float sig(float *w, float *x, int m) {
+__device__ float sig(float *w, float *x, int m) {
 	float s = 0;
 	for (int i = 0; i < m; i++) {
 		s -= w[i] * x[i];
@@ -51,8 +46,9 @@ float sig(float *w, float *x, int m) {
 	return 1 / (1 + expf(s));
 }
 
-float* error(float *X, float *Y, float *W, float *err, int m, int n) {
-	float *temp = (float*)calloc(m, sizeof(float));
+__device__ float* error(float *X, float *Y, float *W, float *err, int m, int n) {
+	float *temp;
+	temp = (float*)malloc(m*sizeof(float));
 	for (int i = 0; i < n; i++) {
 		for (int j = 0; j < m; j++) {
 			temp[j] = X[m*i + j];
@@ -63,8 +59,9 @@ float* error(float *X, float *Y, float *W, float *err, int m, int n) {
 	return err;
 }
 
-float MSE(float *X, float *Y, float *W, float *err, int m, int n) {
-	float *temp = (float*)calloc(m, sizeof(float));
+__device__ float MSE(float *X, float *Y, float *W, float *err, int m, int n) {
+	float *temp;
+	temp = (float*)malloc(m*sizeof(float));
 	for (int i = 0; i < n; i++) {
 		for (int j = 0; j < m; j++) {
 			temp[j] = X[m*i + j];
@@ -79,7 +76,7 @@ float MSE(float *X, float *Y, float *W, float *err, int m, int n) {
 	return mse/n;
 }
 
-float* gradient(float *X, float *Y, float *W, float *grad, float *err, int m, int n) {
+__device__ float* gradient(float *X, float *Y, float *W, float *grad, float *err, int m, int n) {
 	err = error(X, Y, W, err, m, n);
 
 	float val = 0;
@@ -94,67 +91,110 @@ float* gradient(float *X, float *Y, float *W, float *grad, float *err, int m, in
 		for (int i = 0; i < n; i++) {
 			val += X[i*m + j] * err[i];
 		}
-		grad[j] = val - L2*W[j];
+		grad[j] = val - 0.1*W[j];
 	}
 	return grad;
 }
 
-float* train(int m, int n, float *X, float *Y, float *W, float lr, int n_epochs) {
-	float *grad = (float*)calloc(m, sizeof(float));
-	float *err = (float*)calloc(n, sizeof(float));
+__device__ void train(int m, int n, float *X, float *Y, float *W, float lr, int n_epochs) {
+	float *grad;
+	grad = (float*)malloc(m*sizeof(float));
+	float *temp_weights;
+	temp_weights = (float*)malloc(m*sizeof(float));
+	float *err;
+	err = (float*)malloc(n*sizeof(float));
+
 	float temp = 1000.0;
 	float mse = 1000.0;
 	int steps = 0;
+	int train_size = int(0.9 * n);
 
-	int train_size = 0.9 * n;
-	float *X_train = (float*)calloc(train_size*m, sizeof(float));
-	float *Y_train = (float*)calloc(train_size, sizeof(float));
-	float *X_val = (float*)calloc((n-train_size)*m, sizeof(float));
-	float *Y_val = (float*)calloc((n-train_size), sizeof(float));
+	float *X_train;
+	X_train = (float*)malloc(train_size*m* sizeof(float));
+	float *Y_train;
+	Y_train = (float*)malloc(train_size* sizeof(float));
+	float *X_val;
+	X_val = (float*)malloc((n-train_size)*m* sizeof(float));
+	float *Y_val;
+	Y_val = (float*)malloc((n-train_size)* sizeof(float));
 
 	for (int i=0; i<train_size; i++){
-		X_train[i] = X[i];
+		for (int j=0; j<m;j++){
+			X_train[m*i+j] = X[m*i+j];
+		}
 		Y_train[i] = Y[i];
 	}
 	for (int i=0; i<n-train_size; i++){
-		X_val[i] = X[i+train_size];
+		for (int j=0; j<m;j++){
+			X_val[m*i+j] = X[m*(i+train_size)+j];
+		}
 		Y_val[i] = Y[i+train_size];
 	}
 
-	W[0] = 1;
-	while (mse > TOL && steps < n_epochs) {
+	int terminate = -1;
+	W[0] = 1; // set bias fixed to 1
+	while (mse > 0.0001 && steps < n_epochs) {
+		terminate++;
 		steps ++;
 		grad = gradient(X_train, Y_train, W, grad, err, m, train_size);
 		for (int j = 0; j < m; j++) {
-			W[j] += lr * grad[j];
+			W[j] += lr * grad[j]; // we ascend the gradient here.
 		}
 		temp = MSE(X_val, Y_val, W, err, m, n-train_size);
-		if (temp > mse){
-			steps = n_epochs;
-		}
-		else{
+
+		if(temp < mse){
+			terminate = -1;
 			mse = temp;
+			for (int i=0; i < m; i++){ // save model
+				temp_weights[i] = W[i];
+			}
 		}
+		if (terminate >= 5){ // early stopping
+			steps = n_epochs;
+			for (int i=0; i < m; i++){ // load model
+				W[i] = temp_weights[i];
+			}
+		}
+
 	}
 
 	free(grad);
+	free(temp_weights);
 	free(err);
 	free(X_train);
 	free(Y_train);
 	free(X_val);
 	free(Y_val);
-	return W;
 }
 
 
-__global__ void trainer(float *dest, float *a, float *b){
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
-
-
-    //dest[i] = a[i] * b[i] * b[i] * a[i];
+__global__ void trainer(float *dest, int m, int n, int data_size, float *X, float *Y){
+    const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+	float *W;
+	W = (float*)malloc(m* sizeof(float));
+	float *x;
+	x = (float*)malloc(m*n* sizeof(float));
+	float *y;
+	y = (float*)malloc(n* sizeof(float));
+	for (int i=0; i < n; i++){
+		for (int j=0; j < m; j++){
+			printf("%d\\n",n*m*tid + i*m + j);
+			x[i*m+j] = X[n*m*tid + i*m + j];
+			//printf("%f\\t%d\\t\\n",X[n*m*tid + i*m + j],n*m*tid + i*m + j);
+		}
+		y[i] = Y[n*tid + i];
+	}
+	train(m, n, x, y, W, 0.001, 20000);
+	for (int j=0; j<m; j++){
+		dest[tid*m+j] = W[j];
+	}
+	free(W);
+	free(x);
+	free(y);
 }
 
 """)
+# printf("Blah--%d--%d--%d...\\n",n*m*tid + i*m + j,m*data_size,tid);
 
 trainer = mod.get_function("trainer")
 
@@ -189,6 +229,9 @@ elif hyper['dataset'] == 'HEPMASS.csv':
     y = data[:,0]
 
 X_train, X_test, Y_train, Y_test = train_test_split(X, y, stratify=y, test_size=0.2)
+X_train = np.hstack((np.ones_like(Y_train).reshape(-1,1),X_train))
+X_test = np.hstack((np.ones_like(Y_test).reshape(-1,1),X_test))
+
 del data,X,y # not used anymore
 
 # print(list(map(lambda d:d.shape,(X_train, X_test, Y_train, Y_test))))
@@ -203,25 +246,59 @@ X_test = X_test.astype(np.float32)
 Y_train = Y_train.astype(np.float32)
 Y_test = Y_test.astype(np.float32)
 
-#invoke the model
-model = LogisticRegression()
-
 
 #training
 start = time()
-r = X_train.shape[1] + 3 #hyper['r']
+r = X_train.shape[1] + 2 #hyper['r']
 h = hyper['h']
-S = [] # hypotheses
 
 # synthesis
-for _ in range(r**h):
-    x_train,y_train = shuffle(X_train,Y_train,n_samples=hyper['datasize'])
-    model.fit(x_train,y_train)
-    # print(model.coef_,model.intercept_)
-    # exit()
-    S.append(list(model.coef_[0]) + list(model.intercept_)) # storing hypotheses
-S = np.array(S)
+# CPU version
+# for _ in range(r**h):
+#     x_train,y_train = shuffle(X_train,Y_train,n_samples=hyper['datasize'])
+#     model.fit(x_train,y_train)
+#     # print(model.coef_,model.intercept_)
+#     # exit()
+#     S.append(list(model.coef_[0]) + list(model.intercept_)) # storing hypotheses
+# S = np.array(S)
 
+# GPU version
+X_train,Y_train = shuffle(X_train,Y_train)
+S = np.zeros(r**h * (r-2)).astype(np.float32)
+
+# trainer(float *dest, int m, int n, int data_size, float *X, float *Y)
+X_shape = X_train.shape
+X_train = X_train.reshape(-1)
+Y_train = Y_train.reshape(-1)
+
+# print(X_shape,np.int32(r-2),np.int32(X_shape[0]//(r**h)))
+# exit()
+
+S_gpu = cuda.mem_alloc(S.nbytes)
+cuda.memcpy_htod(S_gpu, S)
+X_train_gpu = cuda.mem_alloc(X_train.nbytes)
+cuda.memcpy_htod(X_train_gpu, X_train)
+Y_train_gpu = cuda.mem_alloc(Y_train.nbytes)
+cuda.memcpy_htod(Y_train_gpu, Y_train)
+
+# print(np.int32(X_shape[0]))
+# print(np.int32(X_shape[0]//(r**h)))
+# print((r**h) * (X_train.shape[0]//(r**h)))
+# exit()
+trainer(
+        S_gpu, np.int32(r-2), np.int32(X_shape[0]//(r**h)), np.int32(X_shape[0]), X_train_gpu, Y_train_gpu,
+		block=(2,1,1), grid=(18,1)) # no sharing of data so do it in separate cores
+		# block=(r,1,1), grid=(r**(h-1),1)) # no sharing of data so do it in separate cores
+
+pycuda.autoinit.context.synchronize()
+cuda.memcpy_dtoh(S, S_gpu)
+# cuda.memcpy_dtoh(X_train, X_train_gpu)
+# cuda.memcpy_dtoh(Y_train, Y_train_gpu)
+
+S = S.reshape((r**h , (r-2)))
+
+print(S)
+exit()
 # aggregation
 for _ in range(h,0,-1):
     S_new = []
