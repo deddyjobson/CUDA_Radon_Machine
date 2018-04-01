@@ -1,0 +1,6 @@
+Datasets
+HEPMASS - https://archive.ics.uci.edu/ml/datasets/HEPMASS
+skin - https://archive.ics.uci.edu/ml/datasets/Skin+Segmentation
+
+C code for log_reg
+https://github.com/liyanghua/logistic-regression-in-c--
