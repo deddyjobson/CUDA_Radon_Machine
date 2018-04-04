@@ -47,37 +47,18 @@ __device__ float sig(float *w, float *x, int m) {
 }
 
 __device__ float* error(float *X, float *Y, float *W, float *err, int m, int n) {
-	//float *temp;
-	//temp = (float*)malloc(m*sizeof(float));
 	for (int i = 0; i < n; i++) {
-		/**
-		for (int j = 0; j < m; j++) {
-			temp[j] = X[m*i + j];
-		}
-		err[i] = Y[i] - sig(W, temp, m);
-		**/
 		err[i] = Y[i] - sig(W, X+m*i, m);
 	}
-	//free(temp);
 	return err;
 }
 
-__device__ float MSE(float *X, float *Y, float *W, float *err, int m, int n) {
-	//float *temp;
-	//temp = (float*)malloc(m*sizeof(float));
-	for (int i = 0; i < n; i++) {
-		/**
-		for (int j = 0; j < m; j++) {
-			temp[j] = X[m*i + j];
-		}
-		err[i] = Y[i] - sig(W, temp, m);
-		**/
-		err[i] = Y[i] - sig(W, X+m*i, m);
-	}
-	//free(temp);
+__device__ float MSE(float *X, float *Y, float *W, int m, int n) {
+	float temp = 0;
 	float mse = 0;
-	for (int i = 0; i < n; i++){
-		mse += err[i] * err[i];
+	for (int i = 0; i < n; i++) {
+		temp = Y[i] - sig(W, X+m*i, m);
+		mse += temp * temp;
 	}
 	return mse/n;
 }
@@ -87,9 +68,6 @@ __device__ float* gradient(float *X, float *Y, float *W, float *grad, float *err
 
 	float val = 0;
 
-	for (int i = 0; i < n; i++) {
-		val += X[i*m] * err[i];
-	}
 	grad[0] = 0;
 
 	for (int j = 1; j < m; j++) {
@@ -102,42 +80,11 @@ __device__ float* gradient(float *X, float *Y, float *W, float *grad, float *err
 	return grad;
 }
 
-__device__ void train(int m, int n, float *X, float *Y, float *W, float lr, int n_epochs) {
-	float *grad;
-	grad = (float*)malloc(m*sizeof(float));
-	float *temp_weights;
-	temp_weights = (float*)malloc(m*sizeof(float));
-	float *err;
-	err = (float*)malloc(n*sizeof(float));
-
+__device__ void train(int m, int n, float *X, float *Y, float *W, float *err, float *grad, float *temp_weights, float lr, int n_epochs) {
 	float temp = 1000.0;
 	float mse = 1000.0;
 	int steps = 0;
 	int train_size = int(0.9 * n);
-	/**
-	float *X_train;
-	X_train = (float*)malloc(train_size*m* sizeof(float));
-	float *Y_train;
-	Y_train = (float*)malloc(train_size* sizeof(float));
-	float *X_val;
-	X_val = (float*)malloc((n-train_size)*m* sizeof(float));
-	float *Y_val;
-	Y_val = (float*)malloc((n-train_size)* sizeof(float));
-
-	// printf("%f...\\n",Y_train[train_size-1]);
-	for (int i=0; i<train_size; i++){
-		for (int j=0; j<m;j++){
-			X_train[m*i+j] = X[m*i+j];
-		}
-		Y_train[i] = Y[i];
-	}
-	for (int i=0; i<n-train_size; i++){
-		for (int j=0; j<m;j++){
-			X_val[m*i+j] = X[m*(i+train_size)+j];
-		}
-		Y_val[i] = Y[i+train_size];
-	}
-	**/
 
 	int terminate = -1;
 	W[0] = 1; // set bias fixed to 1
@@ -148,7 +95,7 @@ __device__ void train(int m, int n, float *X, float *Y, float *W, float lr, int 
 		for (int j = 0; j < m; j++) {
 			W[j] += lr * grad[j]; // we ascend the gradient here.
 		}
-		temp = MSE(X+m*train_size, Y+train_size, W, err, m, n-train_size);
+		temp = MSE(X+m*train_size, Y+train_size, W, m, n-train_size);
 
 		if(temp < mse){
 			terminate = -1;
@@ -157,54 +104,22 @@ __device__ void train(int m, int n, float *X, float *Y, float *W, float lr, int 
 				temp_weights[i] = W[i];
 			}
 		}
-		if (terminate >= 5){ // early stopping
+		if (terminate >= 3){ // early stopping
 			steps = n_epochs;
-			for (int i=0; i < m; i++){ // load model
+			for (int i=0; i < m; i++){ // restore best model
 				W[i] = temp_weights[i];
 			}
 		}
 
 	}
 
-	free(grad);
-	free(temp_weights);
-	free(err);
-	/**
-	free(X_train);
-	free(Y_train);
-	free(X_val);
-	free(Y_val);
-	**/
 }
 
 
-__global__ void trainer(float *dest, int m, int n, int data_size, float *X, float *Y){
+__global__ void trainer(float *W, int m, int n, int data_size, float *X, float *Y, float *err, float *grad, float *temp_weights){
     const int tid = blockIdx.x * blockDim.x + threadIdx.x;
-	float *W;
-	W = (float*)malloc(m* sizeof(float));
-	/**
-	float *x;
-	x = (float*)malloc(m*n* sizeof(float));
-	float *y;
-	y = (float*)malloc(n* sizeof(float));
-	for (int i=0; i < n; i++){
-		for (int j=0; j < m; j++){
-			x[i*m+j] = X[n*m*tid + i*m + j];
-		}
-		y[i] = Y[n*tid + i];
-	}
-	**/
-	train(m, n, X + n*m*tid, Y + n*tid, W, 0.001, 20000);
-	for (int j=0; j<m-1; j++){
-		dest[tid*(m-1)+j] = W[j+1];
-	}
-	free(W);
-	/**
-	free(x);
-	free(y);
-	**/
+	train(m, n, X + n*m*tid, Y + n*tid, W + tid*m, err+tid*n, grad+tid*m, temp_weights+tid*m, 0.001, 20000);
 }
-
 """)
 # printf("Blah--%d--%d--%d...\\n",n*m*tid + i*m + j,m*data_size,tid);
 
@@ -266,7 +181,7 @@ h = hyper['h']
 
 # synthesis - GPU version
 X_train,Y_train = shuffle(X_train,Y_train)
-S = np.zeros(r**h * (r-2)).astype(np.float32)
+S = np.zeros(r**h * (r-1)).astype(np.float32) # one more than required to store bias temporarily
 
 # trainer(float *dest, int m, int n, int data_size, float *X, float *Y)
 X_shape = X_train.shape
@@ -282,10 +197,14 @@ X_train_gpu = cuda.mem_alloc(X_train.nbytes)
 cuda.memcpy_htod(X_train_gpu, X_train)
 Y_train_gpu = cuda.mem_alloc(Y_train.nbytes)
 cuda.memcpy_htod(Y_train_gpu, Y_train)
+err = cuda.mem_alloc(np.zeros(X_shape[0] - X_shape[0]%(r**h), dtype=np.float32).nbytes)
+grad = cuda.mem_alloc(np.zeros(X_shape[1], dtype=np.float32).nbytes)
+temp_weights = cuda.mem_alloc(np.zeros(X_shape[1], dtype=np.float32).nbytes)
 
 
 trainer(
-        S_gpu, np.int32(X_shape[1]), np.int32(X_shape[0]//(r**h)), np.int32(X_shape[0]), X_train_gpu, Y_train_gpu,
+        S_gpu, np.int32(X_shape[1]), np.int32(X_shape[0]//(r**h)), np.int32(X_shape[0]),
+		 X_train_gpu, Y_train_gpu, err, grad, temp_weights,
 		block=(1,1,1), grid=(r**h,1)) # no sharing of data so do it in separate cores
 		# block=(r,1,1), grid=(r**(h-1),1)) # no sharing of data so do it in separate cores
 
@@ -293,7 +212,8 @@ cuda.memcpy_dtoh(S, S_gpu)
 # cuda.memcpy_dtoh(X_train, X_train_gpu)
 # cuda.memcpy_dtoh(Y_train, Y_train_gpu)
 
-S = S.reshape((r**h , (r-2)))
+S = S.reshape((r**h , (r-1)))
+S = S[:,1:]
 
 # print(S)
 # exit()
