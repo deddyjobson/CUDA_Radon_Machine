@@ -280,16 +280,12 @@ cuda.memcpy_htod(X_train_gpu, X_train)
 Y_train_gpu = cuda.mem_alloc(Y_train.nbytes)
 cuda.memcpy_htod(Y_train_gpu, Y_train)
 
-# print(np.int32(X_shape[0]))
-# print(np.int32(X_shape[0]//(r**h)))
-# print((r**h) * (X_train.shape[0]//(r**h)))
-# exit()
+
 trainer(
         S_gpu, np.int32(X_shape[1]), np.int32(X_shape[0]//(r**h)), np.int32(X_shape[0]), X_train_gpu, Y_train_gpu,
-		block=(r,1,1), grid=(r**(h-1),1)) # no sharing of data so do it in separate cores
+		block=(1,1,1), grid=(r**h,1)) # no sharing of data so do it in separate cores
 		# block=(r,1,1), grid=(r**(h-1),1)) # no sharing of data so do it in separate cores
 
-pycuda.autoinit.context.synchronize()
 cuda.memcpy_dtoh(S, S_gpu)
 # cuda.memcpy_dtoh(X_train, X_train_gpu)
 # cuda.memcpy_dtoh(Y_train, Y_train_gpu)
@@ -311,18 +307,18 @@ for _ in range(h,0,-1):
     np.random.shuffle(S) # to make it iid like
 
 # print('Finished with aggregation')
-print(S)
-exit()
-weights = np.array([S[0,:-1]])
-bias = np.array([S[0,-1]])
-model.coef_ = weights
-model.intercept_ = bias
+# print(S)
+# exit()
+weights = np.concatenate(([1],S[0]))
 
 end = time()
 
+def predict(x,w=weights):
+	return (np.sum(w * x, axis=1) > 0).astype(np.int32)
 
 #evaluating
-y_preds = model.predict(X_test)
+y_preds = predict(X_test, weights)
+
 fscore = f1_score(Y_test,y_preds,average='micro')
 
 print('Test Performance: {0:.2f}%'.format(100*fscore))
