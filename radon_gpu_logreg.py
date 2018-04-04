@@ -20,7 +20,7 @@ np.random.seed(42)
 parser = argparse.ArgumentParser()
 parser.add_argument('--r',type=int,default=5) # useless, code decides
 parser.add_argument('--h',type=int,default=2)
-parser.add_argument('--datasize',type=int,default=10000)
+parser.add_argument('--datasize',type=int,default=10000) # code decides
 parser.add_argument('--dataset',type=str,default='skin.csv')
 
 parameters = parser.parse_args()
@@ -60,15 +60,18 @@ __device__ float* error(float *X, float *Y, float *W, float *err, int m, int n) 
 }
 
 __device__ float MSE(float *X, float *Y, float *W, float *err, int m, int n) {
-	float *temp;
-	temp = (float*)malloc(m*sizeof(float));
+	//float *temp;
+	//temp = (float*)malloc(m*sizeof(float));
 	for (int i = 0; i < n; i++) {
+		/**
 		for (int j = 0; j < m; j++) {
 			temp[j] = X[m*i + j];
 		}
 		err[i] = Y[i] - sig(W, temp, m);
+		**/
+		err[i] = Y[i] - sig(W, X+m*i, m);
 	}
-	free(temp);
+	//free(temp);
 	float mse = 0;
 	for (int i = 0; i < n; i++){
 		mse += err[i] * err[i];
@@ -108,7 +111,7 @@ __device__ void train(int m, int n, float *X, float *Y, float *W, float lr, int 
 	float mse = 1000.0;
 	int steps = 0;
 	int train_size = int(0.9 * n);
-
+	/**
 	float *X_train;
 	X_train = (float*)malloc(train_size*m* sizeof(float));
 	float *Y_train;
@@ -118,6 +121,7 @@ __device__ void train(int m, int n, float *X, float *Y, float *W, float lr, int 
 	float *Y_val;
 	Y_val = (float*)malloc((n-train_size)* sizeof(float));
 
+	// printf("%f...\\n",Y_train[train_size-1]);
 	for (int i=0; i<train_size; i++){
 		for (int j=0; j<m;j++){
 			X_train[m*i+j] = X[m*i+j];
@@ -130,17 +134,18 @@ __device__ void train(int m, int n, float *X, float *Y, float *W, float lr, int 
 		}
 		Y_val[i] = Y[i+train_size];
 	}
+	**/
 
 	int terminate = -1;
 	W[0] = 1; // set bias fixed to 1
 	while (mse > 0.0001 && steps < n_epochs) {
 		terminate++;
 		steps ++;
-		grad = gradient(X_train, Y_train, W, grad, err, m, train_size);
+		grad = gradient(X, Y, W, grad, err, m, train_size);
 		for (int j = 0; j < m; j++) {
 			W[j] += lr * grad[j]; // we ascend the gradient here.
 		}
-		temp = MSE(X_val, Y_val, W, err, m, n-train_size);
+		temp = MSE(X+m*train_size, Y+train_size, W, err, m, n-train_size);
 
 		if(temp < mse){
 			terminate = -1;
@@ -161,10 +166,12 @@ __device__ void train(int m, int n, float *X, float *Y, float *W, float lr, int 
 	free(grad);
 	free(temp_weights);
 	free(err);
+	/**
 	free(X_train);
 	free(Y_train);
 	free(X_val);
 	free(Y_val);
+	**/
 }
 
 
@@ -172,25 +179,27 @@ __global__ void trainer(float *dest, int m, int n, int data_size, float *X, floa
     const int tid = blockIdx.x * blockDim.x + threadIdx.x;
 	float *W;
 	W = (float*)malloc(m* sizeof(float));
+	/**
 	float *x;
 	x = (float*)malloc(m*n* sizeof(float));
 	float *y;
 	y = (float*)malloc(n* sizeof(float));
 	for (int i=0; i < n; i++){
 		for (int j=0; j < m; j++){
-			printf("%d\\n",n*m*tid + i*m + j);
 			x[i*m+j] = X[n*m*tid + i*m + j];
-			//printf("%f\\t%d\\t\\n",X[n*m*tid + i*m + j],n*m*tid + i*m + j);
 		}
 		y[i] = Y[n*tid + i];
 	}
-	train(m, n, x, y, W, 0.001, 20000);
-	for (int j=0; j<m; j++){
-		dest[tid*m+j] = W[j];
+	**/
+	train(m, n, X + n*m*tid, Y + n*tid, W, 0.001, 20000);
+	for (int j=0; j<m-1; j++){
+		dest[tid*(m-1)+j] = W[j+1];
 	}
 	free(W);
+	/**
 	free(x);
 	free(y);
+	**/
 }
 
 """)
@@ -249,20 +258,10 @@ Y_test = Y_test.astype(np.float32)
 
 #training
 start = time()
-r = X_train.shape[1] + 2 #hyper['r']
+r = X_train.shape[1] + 1 #hyper['r']
 h = hyper['h']
 
-# synthesis
-# CPU version
-# for _ in range(r**h):
-#     x_train,y_train = shuffle(X_train,Y_train,n_samples=hyper['datasize'])
-#     model.fit(x_train,y_train)
-#     # print(model.coef_,model.intercept_)
-#     # exit()
-#     S.append(list(model.coef_[0]) + list(model.intercept_)) # storing hypotheses
-# S = np.array(S)
-
-# GPU version
+# synthesis - GPU version
 X_train,Y_train = shuffle(X_train,Y_train)
 S = np.zeros(r**h * (r-2)).astype(np.float32)
 
@@ -286,8 +285,8 @@ cuda.memcpy_htod(Y_train_gpu, Y_train)
 # print((r**h) * (X_train.shape[0]//(r**h)))
 # exit()
 trainer(
-        S_gpu, np.int32(r-2), np.int32(X_shape[0]//(r**h)), np.int32(X_shape[0]), X_train_gpu, Y_train_gpu,
-		block=(2,1,1), grid=(18,1)) # no sharing of data so do it in separate cores
+        S_gpu, np.int32(X_shape[1]), np.int32(X_shape[0]//(r**h)), np.int32(X_shape[0]), X_train_gpu, Y_train_gpu,
+		block=(r,1,1), grid=(r**(h-1),1)) # no sharing of data so do it in separate cores
 		# block=(r,1,1), grid=(r**(h-1),1)) # no sharing of data so do it in separate cores
 
 pycuda.autoinit.context.synchronize()
@@ -297,9 +296,12 @@ cuda.memcpy_dtoh(S, S_gpu)
 
 S = S.reshape((r**h , (r-2)))
 
-print(S)
-exit()
+# print(S)
+# exit()
+
 # aggregation
+# r -= 1
+# S = S[:,1:]
 for _ in range(h,0,-1):
     S_new = []
     for part in batches(S,r):
@@ -309,8 +311,8 @@ for _ in range(h,0,-1):
     np.random.shuffle(S) # to make it iid like
 
 # print('Finished with aggregation')
-# print(S)
-# exit()
+print(S)
+exit()
 weights = np.array([S[0,:-1]])
 bias = np.array([S[0,-1]])
 model.coef_ = weights
