@@ -46,13 +46,6 @@ __device__ float sig(float *w, float *x, int m) {
 	return 1 / (1 + expf(s));
 }
 
-__device__ float* error(float *X, float *Y, float *W, float *err, int m, int n) {
-	for (int i = 0; i < n; i++) {
-		err[i] = Y[i] - sig(W, X+m*i, m);
-	}
-	return err;
-}
-
 __device__ float MSE(float *X, float *Y, float *W, int m, int n) {
 	float temp = 0;
 	float mse = 0;
@@ -63,20 +56,22 @@ __device__ float MSE(float *X, float *Y, float *W, int m, int n) {
 	return mse/n;
 }
 
-__device__ float* gradient(float *X, float *Y, float *W, float *grad, float *err, int m, int n) {
-	err = error(X, Y, W, err, m, n);
 
+__device__ float* gradient(float *X, float *Y, float *W, float *grad, float *err, int m, int n) {
 	float val = 0;
 
 	grad[0] = 0;
 
-	for (int j = 1; j < m; j++) {
-		val = 0;
-		for (int i = 0; i < n; i++) {
-			val += X[i*m + j] * err[i];
+	for (int i = 0; i < n; i++) {
+		val = Y[i] - sig(W, X+m*i, m);
+		for (int j = 1; j < m; j++) {
+			grad[j] += X[i*m + j] * val;
 		}
-		grad[j] = val - 0.1*W[j];
 	}
+	for (int j = 1; j < m; j++) {
+		grad[j] -= 0.1*W[j];
+	}
+
 	return grad;
 }
 
