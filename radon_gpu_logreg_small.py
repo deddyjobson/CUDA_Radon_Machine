@@ -47,16 +47,34 @@ __device__ float sig(float *w, float *x, int m) {
 }
 
 __device__ float* error(float *X, float *Y, float *W, float *err, int m, int n) {
+	//float *temp;
+	//temp = (float*)malloc(m*sizeof(float));
 	for (int i = 0; i < n; i++) {
+		/**
+		for (int j = 0; j < m; j++) {
+			temp[j] = X[m*i + j];
+		}
+		err[i] = Y[i] - sig(W, temp, m);
+		**/
 		err[i] = Y[i] - sig(W, X+m*i, m);
 	}
+	//free(temp);
 	return err;
 }
 
 __device__ float MSE(float *X, float *Y, float *W, float *err, int m, int n) {
+	//float *temp;
+	//temp = (float*)malloc(m*sizeof(float));
 	for (int i = 0; i < n; i++) {
+		/**
+		for (int j = 0; j < m; j++) {
+			temp[j] = X[m*i + j];
+		}
+		err[i] = Y[i] - sig(W, temp, m);
+		**/
 		err[i] = Y[i] - sig(W, X+m*i, m);
 	}
+	//free(temp);
 	float mse = 0;
 	for (int i = 0; i < n; i++){
 		mse += err[i] * err[i];
@@ -96,6 +114,30 @@ __device__ void train(int m, int n, float *X, float *Y, float *W, float lr, int 
 	float mse = 1000.0;
 	int steps = 0;
 	int train_size = int(0.9 * n);
+	/**
+	float *X_train;
+	X_train = (float*)malloc(train_size*m* sizeof(float));
+	float *Y_train;
+	Y_train = (float*)malloc(train_size* sizeof(float));
+	float *X_val;
+	X_val = (float*)malloc((n-train_size)*m* sizeof(float));
+	float *Y_val;
+	Y_val = (float*)malloc((n-train_size)* sizeof(float));
+
+	// printf("%f...\\n",Y_train[train_size-1]);
+	for (int i=0; i<train_size; i++){
+		for (int j=0; j<m;j++){
+			X_train[m*i+j] = X[m*i+j];
+		}
+		Y_train[i] = Y[i];
+	}
+	for (int i=0; i<n-train_size; i++){
+		for (int j=0; j<m;j++){
+			X_val[m*i+j] = X[m*(i+train_size)+j];
+		}
+		Y_val[i] = Y[i+train_size];
+	}
+	**/
 
 	int terminate = -1;
 	W[0] = 1; // set bias fixed to 1
@@ -127,20 +169,42 @@ __device__ void train(int m, int n, float *X, float *Y, float *W, float lr, int 
 	free(grad);
 	free(temp_weights);
 	free(err);
+	/**
+	free(X_train);
+	free(Y_train);
+	free(X_val);
+	free(Y_val);
+	**/
 }
 
 
 __global__ void trainer(float *dest, int m, int n, int data_size, float *X, float *Y){
     const int tid = blockIdx.x * blockDim.x + threadIdx.x;
 	float *W;
-	//W == dest;
 	W = (float*)malloc(m* sizeof(float));
+	/**
+	float *x;
+	x = (float*)malloc(m*n* sizeof(float));
+	float *y;
+	y = (float*)malloc(n* sizeof(float));
+	for (int i=0; i < n; i++){
+		for (int j=0; j < m; j++){
+			x[i*m+j] = X[n*m*tid + i*m + j];
+		}
+		y[i] = Y[n*tid + i];
+	}
+	**/
 	train(m, n, X + n*m*tid, Y + n*tid, W, 0.001, 20000);
-	for (int j=0; j<m; j++){
-		dest[tid*m+j] = W[j];
+	for (int j=0; j<m-1; j++){
+		dest[tid*(m-1)+j] = W[j+1];
 	}
 	free(W);
+	/**
+	free(x);
+	free(y);
+	**/
 }
+
 """)
 # printf("Blah--%d--%d--%d...\\n",n*m*tid + i*m + j,m*data_size,tid);
 
@@ -202,7 +266,7 @@ h = hyper['h']
 
 # synthesis - GPU version
 X_train,Y_train = shuffle(X_train,Y_train)
-S = np.zeros(r**h * (r-1)).astype(np.float32) # one more than required to store bias temporarily
+S = np.zeros(r**h * (r-2)).astype(np.float32)
 
 # trainer(float *dest, int m, int n, int data_size, float *X, float *Y)
 X_shape = X_train.shape
@@ -229,11 +293,10 @@ cuda.memcpy_dtoh(S, S_gpu)
 # cuda.memcpy_dtoh(X_train, X_train_gpu)
 # cuda.memcpy_dtoh(Y_train, Y_train_gpu)
 
-S = S.reshape((r**h , (r-1)))
-S = S[:,1:]
+S = S.reshape((r**h , (r-2)))
 
-print(S)
-exit()
+# print(S)
+# exit()
 
 # aggregation
 # r -= 1
