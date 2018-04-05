@@ -55,7 +55,7 @@ end = time()
 
 #evaluating
 y_preds = model.predict(X_test)
-fscore = f1_score(Y_test,y_preds,average='micro')
+fscore = f1_score(Y_test,y_preds,average='binary')
 
 print('Test Performance: {0:.2f}%'.format(100*fscore))
 print('Train Time: {0:.2f} seconds'.format(end-start))

@@ -69,7 +69,7 @@ __device__ float* gradient(float *X, float *Y, float *W, float *grad, int m, int
 		}
 	}
 	for (int j = 1; j < m; j++) {
-		grad[j] -= 0.1*W[j];
+		grad[j] -= W[j];
 	}
 
 	return grad;
@@ -236,7 +236,7 @@ def predict(x,w=weights):
 #evaluating
 y_preds = predict(X_test, weights)
 
-fscore = f1_score(Y_test,y_preds,average='micro')
+fscore = f1_score(Y_test,y_preds,average='binary')
 
 print('Test Performance: {0:.2f}%'.format(100*fscore))
 print('Train Time: {0:.2f} seconds'.format(end-start))
