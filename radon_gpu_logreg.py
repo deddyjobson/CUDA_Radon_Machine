@@ -147,8 +147,9 @@ if hyper['dataset'] == 'skin.csv':
     X = data[:,:-1]
     y = data[:,-1]
 elif hyper['dataset'] == 'HEPMASS.csv':
-    X = data[:,1:]
-    y = data[:,0]
+	lim = 10**6
+	X = data[:lim,1:]
+	y = data[:lim,0]
 
 X_train, X_test, Y_train, Y_test = train_test_split(X, y, stratify=y, test_size=0.2)
 X_train = np.hstack((np.ones_like(Y_train).reshape(-1,1),X_train))
