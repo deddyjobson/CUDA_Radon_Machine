@@ -11,7 +11,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import f1_score
 from sklearn.utils import shuffle
-from time import time
+from time import time, sleep
 from copy import deepcopy
 from pycuda.compiler import SourceModule
 
@@ -39,81 +39,82 @@ mod = SourceModule("""
 
 
 __device__ float sig(float *w, float *x, int m) {
-	float s = 0;
-	for (int i = 0; i < m; i++) {
-		s -= w[i] * x[i];
-	}
-	return 1 / (1 + expf(s));
+    float s = 0;
+    for (int i = 0; i < m; i++) {
+        s -= w[i] * x[i];
+    }
+    return 1 / (1 + expf(s));
 }
 
 __device__ float MSE(float *X, float *Y, float *W, int m, int n) {
-	float temp = 0;
-	float mse = 0;
-	for (int i = 0; i < n; i++) {
-		temp = Y[i] - sig(W, X+m*i, m);
-		mse += temp * temp;
-	}
-	return mse/n;
+    float temp = 0;
+    float mse = 0;
+    for (int i = 0; i < n; i++) {
+        temp = Y[i] - sig(W, X+m*i, m);
+        mse += temp * temp;
+    }
+    return mse/n;
 }
 
 
 __device__ float* gradient(float *X, float *Y, float *W, float *grad, int m, int n) {
-	float val = 0;
+    float val = 0;
 
-	grad[0] = 0;
+    grad[0] = 0;
 
-	for (int i = 0; i < n; i++) {
-		val = Y[i] - sig(W, X+m*i, m);
-		for (int j = 1; j < m; j++) {
-			grad[j] += X[i*m + j] * val;
-		}
-	}
-	for (int j = 1; j < m; j++) {
-		grad[j] -= W[j];
-	}
+    for (int i = 0; i < n; i++) {
+        val = Y[i] - sig(W, X+m*i, m);
+        for (int j = 1; j < m; j++) {
+            grad[j] += X[i*m + j] * val;
+        }
+    }
+    for (int j = 1; j < m; j++) {
+        grad[j] -= W[j];
+    }
 
-	return grad;
+    return grad;
 }
 
 __device__ void train(int m, int n, float *X, float *Y, float *W, float *grad, float *temp_weights, float lr, int n_epochs) {
-	float temp = 1000.0;
-	float mse = 1000.0;
-	int steps = 0;
-	int train_size = int(0.9 * n);
+    float temp = 1000.0;
+    float mse = 1000.0;
+    int steps = 0;
+    int train_size = int(0.9 * n);
 
-	int terminate = -1;
-	W[0] = 1; // set bias fixed to 1
-	while (mse > 0.0001 && steps < n_epochs) {
-		terminate++;
-		steps ++;
-		grad = gradient(X, Y, W, grad, m, train_size);
-		for (int j = 0; j < m; j++) {
-			W[j] += lr * grad[j]; // we ascend the gradient here.
-		}
-		temp = MSE(X+m*train_size, Y+train_size, W, m, n-train_size);
+    int terminate = -1;
+    W[0] = 1; // set bias fixed to 1
+    while (mse > 0.0001 && steps < n_epochs) {
+        terminate++;
+        steps ++;
+        grad = gradient(X, Y, W, grad, m, train_size);
+        for (int j = 0; j < m; j++) {
+            W[j] += lr * grad[j]; // we ascend the gradient here.
+        }
+        temp = MSE(X+m*train_size, Y+train_size, W, m, n-train_size);
 
-		if(temp < mse){
-			terminate = -1;
-			mse = temp;
-			for (int i=0; i < m; i++){ // save model
-				temp_weights[i] = W[i];
-			}
-		}
-		if (terminate >= 5){ // early stopping
-			steps = n_epochs;
-			for (int i=0; i < m; i++){ // restore best model
-				W[i] = temp_weights[i];
-			}
-		}
+        if(temp < mse){
+            terminate = -1;
+            mse = temp;
+            for (int i=0; i < m; i++){ // save model
+                temp_weights[i] = W[i];
+            }
+        }
+        if (terminate >= 10){ // early stopping
+            steps = n_epochs;
+            for (int i=0; i < m; i++){ // restore best model
+                W[i] = temp_weights[i];
+            }
+        }
 
-	}
+    }
 
 }
 
 
 __global__ void trainer(float *W, int m, int n, int data_size, float *X, float *Y, float *grad, float *temp_weights){
-    const int tid = blockIdx.x * blockDim.x + threadIdx.x;
-	train(m, n, X + n*m*tid, Y + n*tid, W + tid*m, grad+tid*m, temp_weights+tid*m, 0.001, 20000);
+    const int tid = blockIdx.y * gridDim.x + blockIdx.x;
+    //const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    train(m, n, X + n*m*tid, Y + n*tid, W + tid*m, grad+tid*m, temp_weights+tid*m, 0.001, 20000);
 }
 """)
 # printf("Blah--%d--%d--%d...\\n",n*m*tid + i*m + j,m*data_size,tid);
@@ -147,9 +148,9 @@ if hyper['dataset'] == 'skin.csv':
     X = data[:,:-1]
     y = data[:,-1]
 elif hyper['dataset'] == 'HEPMASS.csv':
-	lim = 10**6
-	X = data[:lim,1:]
-	y = data[:lim,0]
+    lim = 10**6
+    X = data[:lim,1:]
+    y = data[:lim,0]
 
 X_train, X_test, Y_train, Y_test = train_test_split(X, y, stratify=y, test_size=0.2)
 X_train = np.hstack((np.ones_like(Y_train).reshape(-1,1),X_train))
@@ -172,12 +173,12 @@ Y_test = Y_test.astype(np.float32)
 
 #training
 start = time()
-r = X_train.shape[1] + 1 #hyper['r']
+r = X_train.shape[1] + 2 # (#dims in hyperspace) +2
 h = hyper['h']
 
 # synthesis - GPU version
 X_train,Y_train = shuffle(X_train,Y_train)
-S = np.zeros(r**h * (r-1)).astype(np.float32) # one more than required to store bias temporarily
+S = np.zeros(r**h * X_train.shape[1]).astype(np.float32) # one more than required to store bias temporarily
 
 # trainer(float *dest, int m, int n, int data_size, float *X, float *Y)
 X_shape = X_train.shape
@@ -199,26 +200,32 @@ temp_weights = cuda.mem_alloc(np.zeros(X_shape[1], dtype=np.float32).nbytes)
 
 trainer(
         S_gpu, np.int32(X_shape[1]), np.int32(X_shape[0]//(r**h)), np.int32(X_shape[0]),
-		 X_train_gpu, Y_train_gpu, grad, temp_weights,
-		block=(1,1,1), grid=(r**h,1)) # no sharing of data so do it in separate cores
-		# block=(r,1,1), grid=(r**(h-1),1)) # no sharing of data so do it in separate cores
+         X_train_gpu, Y_train_gpu, grad, temp_weights,
+        block=(1,1,1), grid=(r**(h-1),r)) # no sharing of data so do it in separate cores
+        # block=(r,1,1), grid=(r**(h-1),1)) # no sharing of data so do it in separate cores
+
+X_train_gpu.free()
+Y_train_gpu.free()
+grad.free()
+temp_weights.free()
 
 cuda.memcpy_dtoh(S, S_gpu)
-# cuda.memcpy_dtoh(X_train, X_train_gpu)
-# cuda.memcpy_dtoh(Y_train, Y_train_gpu)
+S_gpu.free()
 
-S = S.reshape((r**h , (r-1)))
-S = S[:,1:]
-
+S = S.reshape((r**h , X_shape[1]))
+# S = S[:,1:]
 # print(S)
 # exit()
 
+S += np.random.randn(*S.shape)*1e-5 # to ensure no two equal hypotheses
+
 # aggregation
-# r -= 1
-# S = S[:,1:]
 for _ in range(h,0,-1):
     S_new = []
     for part in batches(S,r):
+        # print(part.shape)
+        # print(part)
+        # exit()
         r_pt = radon_point(part)
         S_new.append(r_pt)
     S = np.array(S_new)
@@ -227,12 +234,13 @@ for _ in range(h,0,-1):
 # print('Finished with aggregation')
 # print(S)
 # exit()
-weights = np.concatenate(([1],S[0]))
+# weights = np.concatenate(([1],S[0]))
+weights = S[0]
 
 end = time()
 
 def predict(x,w=weights):
-	return (np.sum(w * x, axis=1) > 0).astype(np.int32)
+    return (np.sum(w * x, axis=1) > 0).astype(np.int32)
 
 #evaluating
 y_preds = predict(X_test, weights)

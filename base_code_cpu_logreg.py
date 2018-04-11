@@ -32,8 +32,9 @@ if hyper['dataset'] == 'skin.csv':
     X = data[:,:-1]
     y = data[:,-1]
 elif hyper['dataset'] == 'HEPMASS.csv':
-    X = data[:,1:]
-    y = data[:,0]
+    lim = 10**6
+    X = data[:lim,1:]
+    y = data[:lim,0]
 
 X_train, X_test, Y_train, Y_test = train_test_split(X, y, stratify=y, test_size=0.2)
 del data,X,y # not used anymore
@@ -46,7 +47,7 @@ prep.fit_transform(X_train)
 prep.transform(X_test)
 
 #invoke the model
-model = LogisticRegression(fit_intercept = False)
+model = LogisticRegression(fit_intercept = False, n_jobs=1, solver='liblinear')
 
 #training
 start = time()
