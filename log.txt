@@ -1,7 +1,0 @@
-Datasets
-HEPMASS - https://archive.ics.uci.edu/ml/datasets/HEPMASS
-skin - https://archive.ics.uci.edu/ml/datasets/Skin+Segmentation
-Gas Monitor - https://archive.ics.uci.edu/ml/datasets/Gas+sensors+for+home+activity+monitoring
-
-C code for log_reg
-https://github.com/liyanghua/logistic-regression-in-c--
